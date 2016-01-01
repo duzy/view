@@ -41,32 +41,43 @@ func (w *gtkWidget) g() *C.GtkWidget {
         return C.ToWidget(unsafe.Pointer(w.glibInitiallyUnowned.glibObject.g))
 }
 
-func (w *gtkWidget) Get(name PropName) (Value, error) {
-        return Value{ reflect.ValueOf(nil) }, nil
+func (w *gtkWidget) Get(name PropName) (ValueType, error) {
+        return ValueType{ reflect.ValueOf(nil) }, nil
 }
 
-func (w *gtkWidget) Set(name PropName, value Value) error {
+func (w *gtkWidget) Set(name PropName, value ValueType) error {
         switch g := w.g(); name {
         case ShowAll:
-                if b := value.IsValid() && value.Bool(); b {
+                if value.IsValid() && value.Bool() {
                         C.gtk_widget_show_all(g)
                 } else {
                         C.gtk_widget_hide(g)
                 }
         case Size:
+                if value.IsValid() && value.CanInterface() {
+                        if s, ok := value.Interface().(SizeType); ok {
+                                C.gtk_widget_set_size_request(g, (C.gint)(s.X), (C.gint)(s.Y))
+                        }
+                }
         }
         return nil
 }
 
-func (w *gtkWidget) Connect(name SignalName, h interface{}) error {
-        return nil
+func (w *gtkWidget) Connect(name SignalName, h interface{}) (Connection, error) {
+        o := w.glibInitiallyUnowned.glibObject
+        s, e := o.connect(string(name), false, h, nil)
+        if e != nil {
+                return 0, e
+        }
+        return Connection(s), nil
 }
 
-func (w *gtkWidget) Disconnect(name SignalName) (interface{}, error) {
-        return nil, nil
+func (w *gtkWidget) Disconnect(c Connection) (interface{}, error) {
+        o := w.glibInitiallyUnowned.glibObject
+        return o.disconnect(glibSignalHandle(c)), nil
 }
 
-func (w *gtkWindow) Get(name PropName) (Value, error) {
+func (w *gtkWindow) Get(name PropName) (ValueType, error) {
         switch g := C.ToWindow(unsafe.Pointer(w.g())); name {
         case Title:
                 s := C.GoString((*C.char)(C.gtk_window_get_title(g)));
@@ -75,7 +86,7 @@ func (w *gtkWindow) Get(name PropName) (Value, error) {
         return w.gtkWidget.Get(name)
 }
 
-func (w *gtkWindow) Set(name PropName, value Value) error {
+func (w *gtkWindow) Set(name PropName, value ValueType) error {
         switch g := C.ToWindow(unsafe.Pointer(w.g())); name {
         case Title:
                 if value.IsValid() && value.Kind() == reflect.String {
@@ -86,7 +97,7 @@ func (w *gtkWindow) Set(name PropName, value Value) error {
         return w.gtkWidget.Set(name, value)
 }
 
-func newGtkView(t ViewType) View {
+func newGtkView(t ViewClass) View {
         switch {
         case t == ViewTopLevel:
                 p := unsafe.Pointer(C.gtk_window_new(C.GTK_WINDOW_TOPLEVEL));

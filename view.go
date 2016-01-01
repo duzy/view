@@ -9,20 +9,22 @@ package gv
 
 import (
         "reflect"
+        "image"
 )
 
-type Value struct {
-        reflect.Value
-}
+type ValueType struct { reflect.Value }
+type PointType struct { image.Point }
+type SizeType  struct { image.Point }
 
-type ViewType string
+type ViewClass string
 type PropName string
 type SignalName string
+type Connection uint
 
 // A Bag is a property bag for view.
 type Bag interface {
-        Get(name PropName) (Value, error)
-        Set(name PropName, value Value) error
+        Get(name PropName) (ValueType, error)
+        Set(name PropName, value ValueType) error
 }
 
 // A View is visible rectangle on the screen. Such as top level
@@ -30,12 +32,12 @@ type Bag interface {
 type View interface {
         Bag
 
-        Connect(name SignalName, h interface{}) error
-        Disconnect(name SignalName) (interface{}, error)
+        Connect(name SignalName, h interface{}) (Connection, error)
+        Disconnect(c Connection) (interface{}, error)
 }
 
 const (
-        ViewTopLevel ViewType   = ""
+        ViewTopLevel ViewClass   = ""
 
         ShowAll PropName        = "show-all"
         Size                    = "size"
@@ -44,16 +46,36 @@ const (
         OnDestroy SignalName    = "destroy"
 )
 
-func ValueOf(i interface{}) Value {
-        return Value{ reflect.ValueOf(i) }
+func ValueOf(i interface{}) ValueType {
+        return ValueType{ reflect.ValueOf(i) }
+}
+
+func NewPoint(x, y int) PointType {
+        return PointType{ image.Pt(x, y) }
+}
+
+func NewPointValue(x, y int) ValueType {
+        return ValueOf(NewPoint(x, y))
+}
+
+func NewSize(w, h int) SizeType {
+        return SizeType{ image.Pt(w, h) }
+}
+
+func NewSizeValue(w, h int) ValueType {
+        return ValueOf(NewSize(w, h))
 }
 
 // Create a new view.
-func NewView(t ViewType) View {
+func NewView(t ViewClass) View {
         return View(newGtkView(t))
 }
 
 // Run interaction message loop.
 func Interact() {
         runGtkMain()
+}
+
+func Quit() {
+        quitGtkMain()
 }

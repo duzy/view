@@ -14,6 +14,7 @@ package gv
 // #include <stdint.h>
 // #include <stdlib.h>
 // #include <string.h>
+// extern void glibRemoveClosure(gpointer, GClosure *);
 // extern void glibMarshal(GClosure *, GValue *, guint, GValue *, gpointer, GValue *);
 // static gboolean is_value(GValue *val) { return G_IS_VALUE(val); }
 // static GType value_type(GValue *val) { return G_VALUE_TYPE(val); }
@@ -22,6 +23,7 @@ package gv
 // static inline GClosure * closure_new() {
 //     GClosure *closure = g_closure_new_simple(sizeof(GClosure), NULL);
 //     g_closure_set_marshal(closure, (GClosureMarshal)(glibMarshal));
+//     g_closure_add_finalize_notifier(closure, NULL, glibRemoveClosure);
 //     return closure;
 // }
 import "C"
@@ -35,47 +37,47 @@ import (
 	"sync"
 )
 
-// glibType is a representation of GType.
-type glibType uint
+// glibKind is a representation of GType.
+type glibKind uint
 
 // g_type_name().
-func (t glibType) name() string {
+func (t glibKind) name() string {
 	return C.GoString((*C.char)(C.g_type_name(C.GType(t))))
 }
 
 // g_type_depth().
-func (t glibType) depth() uint {
+func (t glibKind) depth() uint {
 	return uint(C.g_type_depth(C.GType(t)))
 }
 
 // g_type_parent().
-func (t glibType) parent() glibType {
-	return glibType(C.g_type_parent(C.GType(t)))
+func (t glibKind) parent() glibKind {
+	return glibKind(C.g_type_parent(C.GType(t)))
 }
 
 const (
-	glibType_INVALID   glibType = C.G_TYPE_INVALID
-	glibType_NONE      glibType = C.G_TYPE_NONE
-	glibType_INTERFACE glibType = C.G_TYPE_INTERFACE
-	glibType_CHAR      glibType = C.G_TYPE_CHAR
-	glibType_UCHAR     glibType = C.G_TYPE_UCHAR
-	glibType_BOOLEAN   glibType = C.G_TYPE_BOOLEAN
-	glibType_INT       glibType = C.G_TYPE_INT
-	glibType_UINT      glibType = C.G_TYPE_UINT
-	glibType_LONG      glibType = C.G_TYPE_LONG
-	glibType_ULONG     glibType = C.G_TYPE_ULONG
-	glibType_INT64     glibType = C.G_TYPE_INT64
-	glibType_UINT64    glibType = C.G_TYPE_UINT64
-	glibType_ENUM      glibType = C.G_TYPE_ENUM
-	glibType_FLAGS     glibType = C.G_TYPE_FLAGS
-	glibType_FLOAT     glibType = C.G_TYPE_FLOAT
-	glibType_DOUBLE    glibType = C.G_TYPE_DOUBLE
-	glibType_STRING    glibType = C.G_TYPE_STRING
-	glibType_POINTER   glibType = C.G_TYPE_POINTER
-	glibType_BOXED     glibType = C.G_TYPE_BOXED
-	glibType_PARAM     glibType = C.G_TYPE_PARAM
-	glibType_OBJECT    glibType = C.G_TYPE_OBJECT
-	glibType_VARIANT   glibType = C.G_TYPE_VARIANT
+	glibKind_INVALID   glibKind = C.G_TYPE_INVALID
+	glibKind_NONE      glibKind = C.G_TYPE_NONE
+	glibKind_INTERFACE glibKind = C.G_TYPE_INTERFACE
+	glibKind_CHAR      glibKind = C.G_TYPE_CHAR
+	glibKind_UCHAR     glibKind = C.G_TYPE_UCHAR
+	glibKind_BOOLEAN   glibKind = C.G_TYPE_BOOLEAN
+	glibKind_INT       glibKind = C.G_TYPE_INT
+	glibKind_UINT      glibKind = C.G_TYPE_UINT
+	glibKind_LONG      glibKind = C.G_TYPE_LONG
+	glibKind_ULONG     glibKind = C.G_TYPE_ULONG
+	glibKind_INT64     glibKind = C.G_TYPE_INT64
+	glibKind_UINT64    glibKind = C.G_TYPE_UINT64
+	glibKind_ENUM      glibKind = C.G_TYPE_ENUM
+	glibKind_FLAGS     glibKind = C.G_TYPE_FLAGS
+	glibKind_FLOAT     glibKind = C.G_TYPE_FLOAT
+	glibKind_DOUBLE    glibKind = C.G_TYPE_DOUBLE
+	glibKind_STRING    glibKind = C.G_TYPE_STRING
+	glibKind_POINTER   glibKind = C.G_TYPE_POINTER
+	glibKind_BOXED     glibKind = C.G_TYPE_BOXED
+	glibKind_PARAM     glibKind = C.G_TYPE_PARAM
+	glibKind_OBJECT    glibKind = C.G_TYPE_OBJECT
+	glibKind_VARIANT   glibKind = C.G_TYPE_VARIANT
 )
 
 type glibValue struct {
@@ -95,6 +97,8 @@ type glibClosureContext struct {
 	d reflect.Value
 }
 
+type glibSignalHandle uint
+
 var (
         errNilPtr = errors.New("cgo returned unexpected nil pointer")
 
@@ -105,28 +109,30 @@ var (
 		m: make(map[*C.GClosure]glibClosureContext),
 	}
 
-        glibMarshalers = map[glibType] func(uintptr) (interface{}, error) {
-                glibType_INVALID:   glibMarshalInvalid,
-                glibType_NONE:      glibMarshalNone,
-                glibType_INTERFACE: glibMarshalInterface,
-                glibType_CHAR:      glibMarshalChar,
-                glibType_UCHAR:     glibMarshalUchar,
-                glibType_BOOLEAN:   glibMarshalBoolean,
-                glibType_INT:       glibMarshalInt,
-                glibType_LONG:      glibMarshalLong,
-                glibType_ENUM:      glibMarshalEnum,
-                glibType_INT64:     glibMarshalInt64,
-                glibType_UINT:      glibMarshalUint,
-                glibType_ULONG:     glibMarshalUlong,
-                glibType_FLAGS:     glibMarshalFlags,
-                glibType_UINT64:    glibMarshalUint64,
-                glibType_FLOAT:     glibMarshalFloat,
-                glibType_DOUBLE:    glibMarshalDouble,
-                glibType_STRING:    glibMarshalString,
-                glibType_POINTER:   glibMarshalPointer,
-                glibType_BOXED:     glibMarshalBoxed,
-                glibType_OBJECT:    glibMarshalObject,
-                glibType_VARIANT:   glibMarshalVariant,
+	glibSignals = make(map[glibSignalHandle]*C.GClosure)
+
+        glibMarshalers = map[glibKind] func(uintptr) (interface{}, error) {
+                glibKind_INVALID:   glibMarshalInvalid,
+                glibKind_NONE:      glibMarshalNone,
+                glibKind_INTERFACE: glibMarshalInterface,
+                glibKind_CHAR:      glibMarshalChar,
+                glibKind_UCHAR:     glibMarshalUchar,
+                glibKind_BOOLEAN:   glibMarshalBoolean,
+                glibKind_INT:       glibMarshalInt,
+                glibKind_LONG:      glibMarshalLong,
+                glibKind_ENUM:      glibMarshalEnum,
+                glibKind_INT64:     glibMarshalInt64,
+                glibKind_UINT:      glibMarshalUint,
+                glibKind_ULONG:     glibMarshalUlong,
+                glibKind_FLAGS:     glibMarshalFlags,
+                glibKind_UINT64:    glibMarshalUint64,
+                glibKind_FLOAT:     glibMarshalFloat,
+                glibKind_DOUBLE:    glibMarshalDouble,
+                glibKind_STRING:    glibMarshalString,
+                glibKind_POINTER:   glibMarshalPointer,
+                glibKind_BOXED:     glibMarshalBoxed,
+                glibKind_OBJECT:    glibMarshalObject,
+                glibKind_VARIANT:   glibMarshalVariant,
         }
 )
 
@@ -141,8 +147,8 @@ func (v *glibValue) unset() {
 	C.g_value_unset(v.g)
 }
 
-func glibValueInit(t glibType) (*glibValue, error) {
-        if val := C.value_init(C.GType(glibType_POINTER)); val != nil {
+func glibValueInit(t glibKind) (*glibValue, error) {
+        if val := C.value_init(C.GType(glibKind_POINTER)); val != nil {
                 v := &glibValue{ val }
                 runtime.SetFinalizer(v, (*glibValue).unset)
                 return v, nil
@@ -152,7 +158,7 @@ func glibValueInit(t glibType) (*glibValue, error) {
 
 func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 	if v == nil {
-		if val, err := glibValueInit(glibType_POINTER); err != nil {
+		if val, err := glibValueInit(glibKind_POINTER); err != nil {
 			return nil, err
 		} else {
                         C.g_value_set_pointer(val.g, C.gpointer(uintptr(unsafe.Pointer(nil))))
@@ -162,7 +168,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 
 	switch e := v.(type) {
 	case bool:
-		val, err := glibValueInit(glibType_BOOLEAN)
+		val, err := glibValueInit(glibKind_BOOLEAN)
 		if err != nil {
 			return nil, err
 		}
@@ -170,7 +176,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 		return val, nil
 
 	case int8:
-		val, err := glibValueInit(glibType_CHAR)
+		val, err := glibValueInit(glibKind_CHAR)
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +184,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 		return val, nil
 
 	case int64:
-		val, err := glibValueInit(glibType_INT64)
+		val, err := glibValueInit(glibKind_INT64)
 		if err != nil {
 			return nil, err
 		}
@@ -186,7 +192,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 		return val, nil
 
 	case int:
-		val, err := glibValueInit(glibType_INT)
+		val, err := glibValueInit(glibKind_INT)
 		if err != nil {
 			return nil, err
 		}
@@ -194,7 +200,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 		return val, nil
 
 	case uint8:
-		val, err := glibValueInit(glibType_UCHAR)
+		val, err := glibValueInit(glibKind_UCHAR)
 		if err != nil {
 			return nil, err
 		}
@@ -202,7 +208,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 		return val, nil
 
 	case uint64:
-		val, err := glibValueInit(glibType_UINT64)
+		val, err := glibValueInit(glibKind_UINT64)
 		if err != nil {
 			return nil, err
 		}
@@ -210,7 +216,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 		return val, nil
 
 	case uint:
-		val, err := glibValueInit(glibType_UINT)
+		val, err := glibValueInit(glibKind_UINT)
 		if err != nil {
 			return nil, err
 		}
@@ -218,7 +224,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 		return val, nil
 
 	case float32:
-		val, err := glibValueInit(glibType_FLOAT)
+		val, err := glibValueInit(glibKind_FLOAT)
 		if err != nil {
 			return nil, err
 		}
@@ -226,7 +232,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 		return val, nil
 
 	case float64:
-		val, err := glibValueInit(glibType_DOUBLE)
+		val, err := glibValueInit(glibKind_DOUBLE)
 		if err != nil {
 			return nil, err
 		}
@@ -234,7 +240,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 		return val, nil
 
 	case string:
-		val, err := glibValueInit(glibType_STRING)
+		val, err := glibValueInit(glibKind_STRING)
 		if err != nil {
 			return nil, err
 		}
@@ -243,7 +249,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 		return val, nil
 
 	case *glibObject:
-		val, err := glibValueInit(glibType_OBJECT)
+		val, err := glibValueInit(glibKind_OBJECT)
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +267,7 @@ func glibUnmarshalValue(v interface{}) (*glibValue, error) {
 func glibUnmarshalReflectedValue(rval reflect.Value) (*glibValue, error) {
         switch rval.Kind() {
         case reflect.Int8:
-                val, err := glibValueInit(glibType_CHAR)
+                val, err := glibValueInit(glibKind_CHAR)
                 if err != nil {
                         return nil, err
                 }
@@ -275,7 +281,7 @@ func glibUnmarshalReflectedValue(rval reflect.Value) (*glibValue, error) {
                 return nil, errors.New("Type not implemented")
 
         case reflect.Int64:
-                val, err := glibValueInit(glibType_INT64)
+                val, err := glibValueInit(glibKind_INT64)
                 if err != nil {
                         return nil, err
                 }
@@ -283,7 +289,7 @@ func glibUnmarshalReflectedValue(rval reflect.Value) (*glibValue, error) {
                 return val, nil
 
         case reflect.Int:
-                val, err := glibValueInit(glibType_INT)
+                val, err := glibValueInit(glibKind_INT)
                 if err != nil {
                         return nil, err
                 }
@@ -291,7 +297,7 @@ func glibUnmarshalReflectedValue(rval reflect.Value) (*glibValue, error) {
                 return val, nil
 
         case reflect.Uintptr, reflect.Ptr:
-                val, err := glibValueInit(glibType_POINTER)
+                val, err := glibValueInit(glibKind_POINTER)
                 if err != nil {
                         return nil, err
                 }
@@ -308,12 +314,12 @@ func glibMarshalValue(v *C.GValue) (interface{}, error) {
 	}
 
 	actual := C.value_type(v)
-        if f, ok := glibMarshalers[glibType(actual)]; ok {
+        if f, ok := glibMarshalers[glibKind(actual)]; ok {
                 return f(uintptr(unsafe.Pointer(v)))
         }
 
 	fundamental := C.value_fundamental(actual)
-        if f, ok := glibMarshalers[glibType(fundamental)]; ok {
+        if f, ok := glibMarshalers[glibKind(fundamental)]; ok {
                 return f(uintptr(unsafe.Pointer(v)))
         }
 
@@ -473,15 +479,20 @@ func glibMarshal(closure *C.GClosure, retValue *C.GValue, nParams C.guint, param
         }
 }
 
-func glibConnect(signal string, after bool, f interface{}, data ...interface{}) error {
+//export glibRemoveClosure
+func glibRemoveClosure(_ C.gpointer, closure *C.GClosure) {
+	glibClosures.RLock()
+	delete(glibClosures.m, closure)
+	glibClosures.RUnlock()
+}
+
+func glibNewClosure(f interface{}, data ...interface{}) (*C.GClosure, error) {
         fv := reflect.ValueOf(f)
 
         if fv.Type().Kind() != reflect.Func {
-                return errors.New("value is not a func")
+                return nil, errors.New("value is not a func")
         }
         
-        s := C.CString(signal); defer C.free(unsafe.Pointer(s))
-
         c := glibClosureContext{ f:fv }
         if 0 < len(data) {
                 c.d = reflect.ValueOf(data)
@@ -491,6 +502,50 @@ func glibConnect(signal string, after bool, f interface{}, data ...interface{}) 
 	glibClosures.RLock()
 	glibClosures.m[closure] = c
 	glibClosures.RUnlock()
+        return closure, nil
+}
 
-        return nil
+func (obj *glibObject) connect(signal string, after bool, f interface{}, data ...interface{}) (glibSignalHandle, error) {
+	if 1 < len(data) {
+		return 0, errors.New("user data len must be 0 or 1")
+	}
+
+        s := C.CString(signal); defer C.free(unsafe.Pointer(s))
+
+        closure, err := glibNewClosure(f, data)
+	if err != nil {
+		return 0, err
+	}
+
+	handle := glibSignalHandle(C.g_signal_connect_closure(C.gpointer(obj.g),
+		(*C.gchar)(s), closure, gboolean(after)))
+
+	// Map the signal handle to the closure.
+	glibSignals[handle] = closure
+
+	return handle, nil
+}
+
+func (o *glibObject) disconnect(handle glibSignalHandle) (f interface{}) {
+        if closure, ok := glibSignals[handle]; ok {
+                C.g_signal_handler_disconnect(C.gpointer(o.g), C.gulong(handle))
+                C.g_closure_invalidate(closure)
+
+                //glibRemoveClosure(nil, closure) // delete(glibClosures.m, closure)
+                glibClosures.RLock()
+                f = glibClosures.m[closure].f
+                delete(glibClosures.m, closure)
+                glibClosures.RUnlock()
+
+                delete(glibSignals, handle)
+        }
+        return
+}
+
+func (o *glibObject) block(handle glibSignalHandle) {
+	C.g_signal_handler_block(C.gpointer(o.g), C.gulong(handle))
+}
+
+func (o *glibObject) unblock(handle glibSignalHandle) {
+	C.g_signal_handler_unblock(C.gpointer(o.g), C.gulong(handle))
 }
