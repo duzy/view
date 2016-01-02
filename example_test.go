@@ -40,16 +40,6 @@ var strExampleLayoutXml = `<?xml version="1.0" encoding="UTF-8"?>
 </layout>
 `
 
-/*
-func ExampleTopLevel() {
-        win := NewView(ViewTopLevel)
-        win.Set(Title, ValueOf("Example"))
-        win.Set(Size, NewSizeValue(720, 600))
-        win.Set(ShowAll, ValueOf(true))
-        win.Connect(OnDestroy, Quit)
-        Interact()
-} */
-
 func ExampleLoader() {
         v, e := LoadFile("example.xml")
         if e != nil {
@@ -68,6 +58,5 @@ func ExampleLoader() {
 }
 
 func TestExamples(t *testing.T) {
-        //ExampleTopLevel()
         ExampleLoader()
 }

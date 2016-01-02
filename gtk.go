@@ -63,6 +63,7 @@ type gtkWidgetCompatible interface {
         widget() *gtkWidget
 }
 
+// https://developer.gnome.org/gtk3/stable/GtkWidget.html
 type gtkWidget struct {
         glibInitiallyUnowned
         bits flagbits
@@ -415,6 +416,7 @@ func (w *gtkWindow) Set(name PropName, value interface{}) error {
                 if s, ok := value.(string); ok {
                         cs := C.CString(s); defer C.free(unsafe.Pointer(cs))
                         C.gtk_window_set_title(g, (*C.gchar)(cs))
+                        return nil
                 }
         }
         return w.gtkWidget.Set(name, value)
