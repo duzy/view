@@ -14,6 +14,7 @@ import (
         "fmt"
         "encoding/xml"
         "bytes"
+        "strings"
         "errors"
 )
 
@@ -42,63 +43,72 @@ var (
 )
 
 // build recursively create views for a token 
-func (b *builder) build() (v View) {
+func (b *builder) build() (v View, err error) {
         // We don't use Unmarshal, because we need to go through the
         // elements and create things over the traversal.
         for {
                 t, e := b.decoder.Token()
                 if e != nil {
-                        if e != io.EOF {
-                                log.Fatalf("token: %v\n", e)
+                        if e == io.EOF {
+                                break
                         }
-                        return
+                        log.Fatalf("invalid token: %v\n", e)
+                        err = e
                 }
 
-                //log.Printf("token: %T: %v\n", t, t)
+                log.Printf("token: %T: %v\n", t, t)
 
                 switch t := t.(type) {
                 case xml.StartElement:
-                        b.push(t)
+                        if e = b.push(t); e != nil {
+                                return nil, e
+                        }
                 case xml.EndElement:
                         v = b.top.view
-                        b.pop(t)
+                        if e = b.pop(t); e != nil {
+                                return nil, e
+                        }
                 }
         }
 
-        panic(errors.New("not fully built"))
+        log.Fatal("not fully built")
+        return nil, errors.New("partially built")
 }
 
-func (b *builder) push(t xml.StartElement) {
+func (b *builder) push(t xml.StartElement) error {
         create, ok := viewCreators[t.Name.Local]
         if !ok {
                 log.Fatalf("unknown view %v\n", t.Name.Local)
-                return
+                return errors.New("unknown view " + t.Name.Local)
         }
 
         v := create(t.Attr)
         if v == nil {
                 log.Fatalf("cant create view %v\n", t.Name.Local)
-                return
+                return errors.New("unknown view " + t.Name.Local)
         }
 
         if b.top != nil {
                 if c, ok := b.top.view.(adder); ok {
                         if e := c.Add(v); e != nil {
                                 log.Fatalf("%v: %v %v\n", b.top.name.Local, e, t.Name.Local)
+                                return e
                         }
                 }
         }
 
         b.top = &stack{ next:b.top, name:t.Name, view:v }
+        return nil
 }
 
-func (b *builder) pop(t xml.EndElement) {
+func (b *builder) pop(t xml.EndElement) error {
         if b.top == nil {
                 log.Fatalf("empty view stack: %v\n", t.Name.Local)
-                return
+                return errors.New("bad view stack " + t.Name.Local)
         }
 
         b.top = b.top.next
+        return nil
 }
 
 func applyViewAttr(v View, a []xml.Attr) View {
@@ -173,6 +183,7 @@ func createVertical(a []xml.Attr) View {
         return applyViewAttr(newGtkBox(1), a)
 }
 
+// Load loads views from a reader.
 func Load(in io.Reader) (View, error) {
         buf := new(bytes.Buffer)
 
@@ -181,9 +192,15 @@ func Load(in io.Reader) (View, error) {
         }
 
         b := &builder{ xml.NewDecoder(buf), nil }
-        return b.build(), nil
+        return b.build()
 }
 
+// LoadString loads views from XML string.
+func LoadString(s string) (View, error) {
+        return Load(strings.NewReader(s))
+}
+
+// LoadFile loads views from XML file.
 func LoadFile(name string) (View, error) {
         f, e := os.Open(name)
         if e != nil {
