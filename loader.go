@@ -11,7 +11,7 @@ import (
         "os"
         "io"
         "log"
-        "fmt"
+        //"fmt"
         "encoding/xml"
         "bytes"
         "strings"
@@ -26,7 +26,12 @@ type stack struct {
 
 type builder struct {
         decoder *xml.Decoder
+        text *bytes.Buffer
         top *stack
+}
+
+type signalCreator interface {
+        createSignal(name string) error
 }
 
 var (
@@ -56,7 +61,7 @@ func (b *builder) build() (v View, err error) {
                         err = e
                 }
 
-                log.Printf("token: %T: %v\n", t, t)
+                //log.Printf("token: %T: %v\n", t, t)
 
                 switch t := t.(type) {
                 case xml.StartElement:
@@ -64,18 +69,39 @@ func (b *builder) build() (v View, err error) {
                                 return nil, e
                         }
                 case xml.EndElement:
-                        v = b.top.view
+                        if b.top != nil { v = b.top.view }
                         if e = b.pop(t); e != nil {
+                                return nil, e
+                        }
+                case xml.CharData:
+                        if _, e := b.text.Write([]byte(t)); e != nil {
                                 return nil, e
                         }
                 }
         }
 
-        log.Fatal("not fully built")
-        return nil, errors.New("partially built")
+        if v == nil {
+                log.Fatal("partially built")
+                return nil, errors.New("partially built")
+        }
+        return v, nil
 }
 
 func (b *builder) push(t xml.StartElement) error {
+        if t.Name.Local == "signal" {
+                if b.top == nil {
+                        log.Fatalf("no view for signal")
+                        return errors.New("no view for signal")
+                }
+
+                if e := createSignal(b.top.view, t.Attr); e != nil {
+                        log.Fatalf("no view for signal")
+                        return e
+                }
+
+                return nil
+        }
+
         create, ok := viewCreators[t.Name.Local]
         if !ok {
                 log.Fatalf("unknown view %v\n", t.Name.Local)
@@ -95,6 +121,16 @@ func (b *builder) push(t xml.StartElement) error {
                                 return e
                         }
                 }
+                if id := getAttrByName(t.Attr, "", "id"); id != nil {
+                        for s := b.top; s != nil; s = s.next {
+                                if f, ok := s.view.(Finder); ok {
+                                        if e := f.insert(id.Value, v); e != nil {
+                                                log.Fatalf("%v.%v: %v\n", b.top.name.Local, t.Name.Local, e)
+                                                return e
+                                        }
+                                }
+                        }
+                }
         }
 
         b.top = &stack{ next:b.top, name:t.Name, view:v }
@@ -102,12 +138,35 @@ func (b *builder) push(t xml.StartElement) error {
 }
 
 func (b *builder) pop(t xml.EndElement) error {
+        if t.Name.Local == "signal" {
+                return nil
+        }
+
         if b.top == nil {
                 log.Fatalf("empty view stack: %v\n", t.Name.Local)
                 return errors.New("bad view stack " + t.Name.Local)
         }
 
+        if s := strings.TrimSpace(b.text.String()); s != "" {
+                b.top.view.Set(Text, prettify(s))
+        }
+
+        b.text.Reset()
         b.top = b.top.next
+        return nil
+}
+
+func prettify(s string) string {
+        // TODO: prettify text?
+        return s
+}
+
+func getAttrByName(a []xml.Attr, space, local string) *xml.Attr {
+        for _, i := range a {
+                if i.Name.Space == space && i.Name.Local == local {
+                        return &i
+                }
+        }
         return nil
 }
 
@@ -115,9 +174,9 @@ func applyViewAttr(v View, a []xml.Attr) View {
         hasShow := false
 
         for _, i := range a {
-                if i.Name.Space == "-" { continue }
+                if i.Name.Space == "-" || i.Name.Local == "id" { continue }
                 if e := v.Set(PropName(i.Name.Local), i.Value); e != nil {
-                        log.Printf("attr: %v %v\n", e, i.Name.Local)
+                        log.Fatalf("attribute: %v %v\n", e, i.Name.Local)
                 }
                 if i.Name.Local == string(Show) {
                         hasShow = true
@@ -129,6 +188,21 @@ func applyViewAttr(v View, a []xml.Attr) View {
         }
 
         return v
+}
+
+func createSignal(v View, a []xml.Attr) error {
+        name := getAttrByName(a, "", "name")
+        if name == nil {
+                log.Fatalf("signal: no name property")
+                return errors.New("signal: no name property")
+        }
+
+        if sc, ok := v.(signalCreator); ok {
+                return sc.createSignal(name.Value)
+        }
+
+        log.Fatalf("view cant have signal")
+        return errors.New("view cant have signal")
 }
 
 func createWindow(a []xml.Attr) View {
@@ -150,12 +224,10 @@ func createView(a []xml.Attr) View {
                 case "horizontal": fallthrough
                 case "h":
                         if t == unknown { t = horizontal }
-
-                        bv := false
-                        if _, e := fmt.Sscanf(i.Value, "%t", &bv); e == nil {
+                        if bv, e := castBoolValue(i.Value); e == nil {
                                 if bv { tt = t }
                         } else {
-                                log.Printf("attr: %v %v\n", e, i.Name.Local)
+                                log.Fatalf("%v: not boolean: %v (%v)\n", i.Name.Local, i.Value, e)
                         }
                 }
         }
@@ -191,7 +263,7 @@ func Load(in io.Reader) (View, error) {
                 return nil, e
         }
 
-        b := &builder{ xml.NewDecoder(buf), nil }
+        b := &builder{ xml.NewDecoder(buf), new(bytes.Buffer) , nil }
         return b.build()
 }
 

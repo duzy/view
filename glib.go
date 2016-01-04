@@ -20,16 +20,66 @@ package gv
 // static GType value_type(GValue *val) { return G_VALUE_TYPE(val); }
 // static GType value_fundamental(GType type) { return G_TYPE_FUNDAMENTAL(type); }
 // static GValue *value_init(GType type) { return g_value_init(g_new0(GValue, 1), type); }
+// static GValue *value_at(GValue *a, int n) { return &a[n]; }
 // static inline GClosure * closure_new() {
 //     GClosure *closure = g_closure_new_simple(sizeof(GClosure), NULL);
 //     g_closure_set_marshal(closure, (GClosureMarshal)(glibMarshal));
 //     g_closure_add_finalize_notifier(closure, NULL, glibRemoveClosure);
 //     return closure;
 // }
+// typedef struct _SignalArgumentsClass {
+//     GTypeClass parent_class;
+// } SignalArgumentsClass;
+// typedef struct _SignalArguments {
+//     GTypeInstance type_instance;
+//     guint go_mapping_id;
+// } SignalArguments;
+// static void signal_arguments_class_init(gpointer clazz, gpointer data) {
+//     SignalArgumentsClass *sac = (SignalArgumentsClass*)(clazz);
+//     (void) (data);
+//     (void) (sac);
+// }
+// /*
+// static void signal_arguments_class_finalize(gpointer clazz, gpointer data) {
+//     SignalArgumentsClass *sac = (SignalArgumentsClass*)(clazz);
+//     (void) (data);
+//     (void) (sac);
+// }
+// */
+// static void signal_arguments_init(GTypeInstance *instance, gpointer clazz) {
+//     SignalArgumentsClass *sac = (SignalArgumentsClass*)(clazz);
+//     SignalArguments *sa = (SignalArguments*)(instance);
+//     sa->go_mapping_id = 0;
+//     (void) (sac);
+// }
+// static GType signal_arguments_type() {
+//     static GType type = 0;
+//     if (type == 0) {
+//         static const GTypeInfo info = {
+//             (guint16)(sizeof(SignalArgumentsClass)),
+//             (GBaseInitFunc)(NULL),
+//             (GBaseFinalizeFunc)(NULL),
+//             (GClassInitFunc)(&signal_arguments_class_init),
+//             (GClassFinalizeFunc)(NULL /*&signal_arguments_class_finalize*/),
+//             (gconstpointer)(NULL),
+//             (guint16)(sizeof(SignalArguments)),
+//             (guint16)(0),
+//             (GInstanceInitFunc)(&signal_arguments_init),
+//             (const GTypeValueTable *)(NULL)
+//         };
+//         type = g_type_register_static(g_object_get_type(), "SignalArguments", &info, 0);
+//     }
+//     return type;
+// }
+// static inline guint signal_new(const gchar *name, GType type) {
+//   return g_signal_new(name, type, G_SIGNAL_RUN_FIRST, 0, NULL, NULL,
+//     (GSignalCMarshaller)(glibMarshal), G_TYPE_NONE, 1, G_TYPE_VARIANT);
+// }
 import "C"
 import (
-        "os"
-        "fmt"
+        //"os"
+        //"fmt"
+        "log"
         "errors"
         "unsafe"
         "reflect"
@@ -110,6 +160,13 @@ var (
 	}
 
 	glibSignals = make(map[glibSignalHandle]*C.GClosure)
+        glibSignalArgs = struct {
+		sync.RWMutex
+                m map[uint][]interface{}
+                n uint
+        }{
+                m: make(map[uint][]interface{}), n: 0,
+        }
 
         glibMarshalers = map[glibKind] func(uintptr) (interface{}, error) {
                 glibKind_INVALID:   glibMarshalInvalid,
@@ -309,7 +366,7 @@ func glibUnmarshalReflectedValue(rval reflect.Value) (*glibValue, error) {
 
 // glibMarshalValue converts a GValue to comparable Go type.
 func glibMarshalValue(v *C.GValue) (interface{}, error) {
-	if C.is_value(v) != 0 {
+	if C.is_value(v) == 0 {
 		return nil, errors.New("invalid GValue")
 	}
 
@@ -444,21 +501,40 @@ func glibMarshal(closure *C.GClosure, retValue *C.GValue, nParams C.guint, param
         }
 
         if nAllParams < nCallParams {
-		fmt.Fprintf(os.Stderr, "too many closure args: have %d, max allowed %d\n",
+		log.Fatalf("too many closure args: have %d, max allowed %d\n",
 			nCallParams, nAllParams)
-                return
         }
 
-        values := []C.GValue{}
-        setSliceHeader(unsafe.Pointer(&values), unsafe.Pointer(params), nCallParams)
+        //values := []C.GValue{}
+        //setSliceHeader(unsafe.Pointer(&values), unsafe.Pointer(params), nCallParams)
 
-        args := make([]reflect.Value, 0, nCallParams)
-        for i := 0; i < nCallParams && i < nGlibParams; i++ {
-		if v, e := glibMarshalValue(&values[i]); e != nil {
-			fmt.Fprintf(os.Stderr, "no suitable Go value for arg %d: %v\n", i, e)
-			return
-		} else {
-                        args = append(args, reflect.ValueOf(v).Convert(c.f.Type().In(i)))
+        args, handled := make([]reflect.Value, 0, nCallParams), false
+        if nGlibParams == 2 {
+                v0, v1 := C.value_at(params, C.int(0)), C.value_at(params, C.int(1))
+                if v0 != nil /*C.value_type(v0) == C.G_TYPE_OBJECT*/ && C.value_type(v1) == C.G_TYPE_VARIANT {
+                        v := C.g_value_get_variant(v1)
+                        n := uint(C.g_variant_get_uint32(v))
+                        glibSignalArgs.RLock()
+                        a, ok := glibSignalArgs.m[n]
+                        if ok { delete(glibSignalArgs.m, n) }
+                        glibSignalArgs.RUnlock()
+                        if ok {
+                                for i, v := range a {
+                                        if nCallParams <= i { break }
+                                        args = append(args, reflect.ValueOf(v).Convert(c.f.Type().In(i)))
+                                }
+                        }
+                        handled = true
+                }
+        }
+        if !handled {
+                for i := 0; i < nCallParams && (1+i) < nGlibParams; i++ {
+                        gv := C.value_at(params, C.int(1+i))
+                        if v, e := glibMarshalValue(gv); e != nil {
+                                log.Fatalf("no suitable Go value for arg %d: %v (%v)\n", i, gv, e)
+                        } else {
+                                args = append(args, reflect.ValueOf(v).Convert(c.f.Type().In(i)))
+                        }
                 }
         }
 
@@ -472,18 +548,24 @@ func glibMarshal(closure *C.GClosure, retValue *C.GValue, nParams C.guint, param
 	// values, save the GValue equivalent of the first.
         if rv := c.f.Call(args); retValue != nil && 0 < len(rv) {
  		if v, e := glibUnmarshalValue(rv[0].Interface()); e != nil {
-			fmt.Fprintf(os.Stderr, "cannot unmarshal callback return value: %v", e)
+			log.Fatalf("cannot unmarshal callback return value: %v", e)
 		} else {
 			*retValue = *v.g
 		}
         }
 }
 
+func glibNewSignal(name string, t C.GType) C.guint {
+        cs := C.CString(name); defer C.free(unsafe.Pointer(cs))
+        s := C.signal_new((*C.gchar)(cs), t)
+        return s
+}
+
 //export glibRemoveClosure
 func glibRemoveClosure(_ C.gpointer, closure *C.GClosure) {
-	glibClosures.RLock()
+	glibClosures.Lock()
 	delete(glibClosures.m, closure)
-	glibClosures.RUnlock()
+	glibClosures.Unlock()
 }
 
 func glibNewClosure(f interface{}, data ...interface{}) (*C.GClosure, error) {
@@ -499,9 +581,9 @@ func glibNewClosure(f interface{}, data ...interface{}) (*C.GClosure, error) {
         }
         
         closure :=  C.closure_new()
-	glibClosures.RLock()
+	glibClosures.Lock()
 	glibClosures.m[closure] = c
-	glibClosures.RUnlock()
+	glibClosures.Unlock()
         return closure, nil
 }
 
@@ -512,7 +594,7 @@ func (obj *glibObject) connect(signal string, after bool, f interface{}, data ..
 
         s := C.CString(signal); defer C.free(unsafe.Pointer(s))
 
-        closure, err := glibNewClosure(f, data)
+        closure, err := glibNewClosure(f, data...)
 	if err != nil {
 		return 0, err
 	}

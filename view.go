@@ -15,25 +15,36 @@ import (
 type PointType struct { image.Point }
 type SizeType  struct { image.Point }
 
+type Connection uint
 type PropName string
 type SignalName string
-type Connection uint
+type CustomSignalName SignalName
 
 // A Bag is a property bag for view.
 type getter interface { Get(name PropName) (interface{}, error) }
 type setter interface { Set(name PropName, value interface{}) error }
 type Bag interface { getter; setter }
 
+// adder allows adding a view to it
 type adder interface { Add(v View) error }
-type finder interface { Find(id string) View }
-type Container interface { adder; finder }
+
+// Finder finds a view with an id.
+type Finder interface {
+        insert(id string, view View) error
+        Find(id string) View
+}
+
+// Emitter emits a custom signal.
+type Emitter interface {
+        Emit(name CustomSignalName, args ...interface{}) error
+}
 
 // A View is visible rectangle on the screen. Such as top level
 // window, or a child view in a window or view.
 type View interface {
         Bag
 
-        Connect(name SignalName, h interface{}) (Connection, error)
+        Connect(name SignalName, h interface{}, d ...interface{}) (Connection, error)
         Disconnect(c Connection) (interface{}, error)
 }
 
@@ -42,6 +53,7 @@ const (
         Show                    = "show"
         Size                    = "size"
         Text                    = "text"
+        Placeholder             = "placeholder"
         Pack                    = "pack"
         Spacing                 = "spacing"
         Padding                 = "padding"
@@ -116,7 +128,45 @@ const (
         OnUnmapEvent            = "unmap-event"                 // boolean
         OnUnrealize             = "unrealize"                   // void
         OnVisibilityNotifyEvent = "visibility-notify-event"     // boolean
-        OnWindowStateEvent      = "window-state-event"          // boolean	
+        OnWindowStateEvent      = "window-state-event"          // boolean
+
+        // Static, Editable
+        OnCopyClipboard         = "copy-clipboard"              // void
+        OnMoveCursor            = "move-cursor"                 // void
+        OnPopulatePopup         = "populate-popup"              // void
+
+        // Static
+        OnActivateCurrentLink   = "activate-current-link"       // void
+        OnActivateLink          = "activate-link"               // gboolean
+        //-OnCopyClipboard      = "copy-clipboard"              // void
+        //-OnMoveCursor         = "move-cursor"                 // void
+        //-OnPopulatePopup      = "populate-popup"              // void
+
+        // Pushable, Editable
+        OnActivate              = "activate"            // void
+
+        // Editable
+        //-OnActivate           = "activate"            // void
+        OnBackspace             = "backspace"           // void
+        //-OnCopyClipboard      = "copy-clipboard"      // void
+        OnCutClipboard          = "cut-clipboard"       // void
+        OnDeleteFromCursor      = "delete-from-cursor"  // void
+        OnIconPress             = "icon-press"          // void
+        OnIconRelease           = "icon-release"        // void
+        OnInsertAtCursor        = "insert-at-cursor"    // void
+        //-OnMoveCursor         = "move-cursor"         // void
+        OnPasteClipboard        = "paste-clipboard"     // void
+        //-OnPopulatePopup      = "populate-popup"      // void
+        OnPreeditChanged        = "preedit-changed"     // void
+        OnToggleOverwrite       = "toggle-overwrite"    // void
+
+        // Pushable
+        //-OnActivate           = "activate" // void
+        OnClicked               = "clicked"  // void
+        OnEnter                 = "enter"    // void
+        OnLeave                 = "leave"    // void
+        OnPressed               = "pressed"  // void
+        OnReleased              = "released" // void
 )
 
 func NewPoint(x, y int) PointType {
@@ -132,6 +182,7 @@ func Interact() {
         runGtkMain()
 }
 
+// Quit ends interaction message loop.
 func Quit() {
         quitGtkMain()
 }

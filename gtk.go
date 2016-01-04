@@ -12,16 +12,20 @@ package gv
 // #include <stdint.h>
 // #include <stdlib.h>
 // #include <string.h>
-// static inline GObject *toObject(void *p) { return G_OBJECT(p); }
-// static inline GtkWidget *toWidget(void *p) { return GTK_WIDGET(p); }
-// static inline GtkWindow *toWindow(void *p) { return GTK_WINDOW(p); }
-// static inline GtkContainer *toContainer(void *p) { return GTK_CONTAINER(p); }
-// static inline GtkBox *toBox(void *p) { return GTK_BOX(p); }
-// static inline GtkLabel *toLabel(void *p) { return GTK_LABEL(p); }
-// static inline GtkEntry *toEntry(void *p) { return GTK_ENTRY(p); }
-// static inline GtkTextView *toTextView(void *p) { return GTK_TEXT_VIEW(p); }
-// static inline GtkButton *toButton(void *p) { return GTK_BUTTON(p); }
-// static inline GtkEditable *toEditable(void *p) { return GTK_EDITABLE(p); }
+// extern void glibMarshal(GClosure *, GValue *, guint, GValue *, gpointer, GValue *);
+// static inline GObject *to_object(void *p) { return G_OBJECT(p); }
+// static inline GtkWidget *to_widget(void *p) { return GTK_WIDGET(p); }
+// static inline GtkWindow *to_window(void *p) { return GTK_WINDOW(p); }
+// static inline GtkContainer *to_container(void *p) { return GTK_CONTAINER(p); }
+// static inline GtkBox *to_box(void *p) { return GTK_BOX(p); }
+// static inline GtkLabel *to_label(void *p) { return GTK_LABEL(p); }
+// static inline GtkEntry *to_entry(void *p) { return GTK_ENTRY(p); }
+// static inline GtkTextView *to_textview(void *p) { return GTK_TEXT_VIEW(p); }
+// static inline GtkButton *to_button(void *p) { return GTK_BUTTON(p); }
+// static inline GtkEditable *to_editable(void *p) { return GTK_EDITABLE(p); }
+// static inline void signal_emit_by_name(gpointer instance, const gchar *name, GVariant *v) {
+//   return g_signal_emit_by_name(instance, name, v);
+// }
 // static GtkWidget *widget_new(GType type) { return gtk_widget_new(type, NULL); }
 // static gchar *text_view_get_text(GtkTextView *tv) {
 //   GtkTextIter start, end;
@@ -92,6 +96,7 @@ type gtkButton struct {
 
 type gtkWindow struct {
         gtkWidget
+        views map[string]View
 }
 
 type gtkEditable struct {
@@ -141,7 +146,7 @@ func castSizeValue(value interface{}) (sz SizeType, err error) {
 }
 
 func (w *gtkWidget) g() *C.GtkWidget {
-        return C.toWidget(unsafe.Pointer(w.glibInitiallyUnowned.glibObject.g))
+        return C.to_widget(unsafe.Pointer(w.glibInitiallyUnowned.glibObject.g))
 }
 
 func (w *gtkWidget) widget() *gtkWidget {
@@ -222,9 +227,9 @@ func (w *gtkWidget) Set(name PropName, value interface{}) error {
         return errNoProperty
 }
 
-func (w *gtkWidget) Connect(name SignalName, h interface{}) (Connection, error) {
+func (w *gtkWidget) Connect(name SignalName, h interface{}, d ...interface{}) (Connection, error) {
         o := w.glibInitiallyUnowned.glibObject
-        s, e := o.connect(string(name), false, h, nil)
+        s, e := o.connect(string(name), false, h, d...)
         if e != nil {
                 return 0, e
         }
@@ -238,7 +243,7 @@ func (w *gtkWidget) Disconnect(c Connection) (interface{}, error) {
 
 func (w *gtkBox) Add(v View) error {
         if wc, ok := v.(gtkWidgetCompatible); ok {
-                g, c := C.toBox(unsafe.Pointer(w.g())), wc.widget()
+                g, c := C.to_box(unsafe.Pointer(w.g())), wc.widget()
                 expend := gboolean((c.bits & bitExpend) != 0)
                 fill := gboolean((c.bits & bitFill) != 0)
                 if (w.bits & bitPackStart) != 0 {
@@ -251,12 +256,8 @@ func (w *gtkBox) Add(v View) error {
         return errIncompatibleView
 }
 
-func (w *gtkBox) Find(id string) View {
-        return nil
-}
-
 func (w *gtkBox) Get(name PropName) (interface{}, error) {
-        switch g := C.toBox(unsafe.Pointer(w.g())); name {
+        switch g := C.to_box(unsafe.Pointer(w.g())); name {
         case Pack:
                 if (w.bits & bitPackStart) != 0 {
                         return "start", nil
@@ -272,7 +273,7 @@ func (w *gtkBox) Get(name PropName) (interface{}, error) {
 }
 
 func (w *gtkBox) Set(name PropName, value interface{}) error {
-        switch g := C.toBox(unsafe.Pointer(w.g())); name {
+        switch g := C.to_box(unsafe.Pointer(w.g())); name {
         case Pack:
                 if s, ok := value.(string); ok {
                         if s == "start" {
@@ -299,7 +300,7 @@ func (w *gtkBox) Set(name PropName, value interface{}) error {
 }
 
 func (w *gtkLabel) Get(name PropName) (interface{}, error) {
-        switch g := C.toLabel(unsafe.Pointer(w.g())); name {
+        switch g := C.to_label(unsafe.Pointer(w.g())); name {
         case Text:
                 return C.GoString((*C.char)(C.gtk_label_get_text(g))), nil
         }
@@ -307,7 +308,7 @@ func (w *gtkLabel) Get(name PropName) (interface{}, error) {
 }
 
 func (w *gtkLabel) Set(name PropName, value interface{}) error {
-        switch g := C.toLabel(unsafe.Pointer(w.g())); name {
+        switch g := C.to_label(unsafe.Pointer(w.g())); name {
         case Text:
                 if s, ok := value.(string); ok {
                         cs := C.CString(s); defer C.free(unsafe.Pointer(cs))
@@ -321,19 +322,29 @@ func (w *gtkLabel) Set(name PropName, value interface{}) error {
 }
 
 func (w *gtkEntry) Get(name PropName) (interface{}, error) {
-        switch g := C.toEntry(unsafe.Pointer(w.g())); name {
+        switch g := C.to_entry(unsafe.Pointer(w.g())); name {
         case Text:
                 return C.GoString((*C.char)(C.gtk_entry_get_text(g))), nil
+        case Placeholder:
+                return C.GoString((*C.char)(C.gtk_entry_get_placeholder_text(g))), nil
         }
         return w.gtkWidget.Get(name)
 }
 
 func (w *gtkEntry) Set(name PropName, value interface{}) error {
-        switch g := C.toEntry(unsafe.Pointer(w.g())); name {
+        switch g := C.to_entry(unsafe.Pointer(w.g())); name {
         case Text:
                 if s, ok := value.(string); ok {
                         cs := C.CString(s); defer C.free(unsafe.Pointer(cs))
                         C.gtk_entry_set_text(g, (*C.gchar)(cs))
+                        return nil
+                } else {
+                        return errBadValue
+                }
+        case Placeholder:
+                if s, ok := value.(string); ok {
+                        cs := C.CString(s); defer C.free(unsafe.Pointer(cs))
+                        C.gtk_entry_set_placeholder_text(g, (*C.gchar)(cs))
                         return nil
                 } else {
                         return errBadValue
@@ -343,7 +354,7 @@ func (w *gtkEntry) Set(name PropName, value interface{}) error {
 }
 
 func (w *gtkButton) Get(name PropName) (interface{}, error) {
-        switch g := C.toButton(unsafe.Pointer(w.g())); name {
+        switch g := C.to_button(unsafe.Pointer(w.g())); name {
         case Text:
                 return C.GoString((*C.char)(C.gtk_button_get_label(g))), nil
         }
@@ -351,7 +362,7 @@ func (w *gtkButton) Get(name PropName) (interface{}, error) {
 }
 
 func (w *gtkButton) Set(name PropName, value interface{}) error {
-        switch g := C.toButton(unsafe.Pointer(w.g())); name {
+        switch g := C.to_button(unsafe.Pointer(w.g())); name {
         case Text:
                 if s, ok := value.(string); ok {
                         cs := C.CString(s); defer C.free(unsafe.Pointer(cs))
@@ -366,7 +377,7 @@ func (w *gtkButton) Set(name PropName, value interface{}) error {
 
 func (w *gtkTextView) Get(name PropName) (interface{}, error) {
         //log.Printf("gtkTextView.get")
-        switch g := C.toTextView(unsafe.Pointer(w.g())); name {
+        switch g := C.to_textview(unsafe.Pointer(w.g())); name {
         case Text:
                 text := C.text_view_get_text(g); defer C.g_free(C.gpointer(text))
                 return C.GoString((*C.char)(text)), nil
@@ -376,7 +387,7 @@ func (w *gtkTextView) Get(name PropName) (interface{}, error) {
 
 func (w *gtkTextView) Set(name PropName, value interface{}) error {
         //log.Printf("gtkTextView.set")
-        switch g := C.toTextView(unsafe.Pointer(w.g())); name {
+        switch g := C.to_textview(unsafe.Pointer(w.g())); name {
         case Text:
                 if s, ok := value.(string); ok {
                         cs := C.CString(s); defer C.free(unsafe.Pointer(cs))
@@ -391,19 +402,31 @@ func (w *gtkTextView) Set(name PropName, value interface{}) error {
 
 func (w *gtkWindow) Add(v View) error {
         if c, ok := v.(gtkWidgetCompatible); ok {
-                g := C.toContainer(unsafe.Pointer(w.g()))
+                g := C.to_container(unsafe.Pointer(w.g()))
                 C.gtk_container_add(g, c.widget().g())
                 return nil
         }
         return errIncompatibleView
 }
 
+func (w *gtkWindow) insert(id string, view View) error {
+        if _, ok := w.views[id]; ok {
+                return errors.New("id '"+id+"' taken")
+        }
+
+        w.views[id] = view
+        return nil
+}
+
 func (w *gtkWindow) Find(id string) View {
+        if v, ok := w.views[id]; ok {
+                return v
+        }
         return nil
 }
 
 func (w *gtkWindow) Get(name PropName) (interface{}, error) {
-        switch g := C.toWindow(unsafe.Pointer(w.g())); name {
+        switch g := C.to_window(unsafe.Pointer(w.g())); name {
         case Text:
                 return C.GoString((*C.char)(C.gtk_window_get_title(g))), nil
         }
@@ -411,7 +434,7 @@ func (w *gtkWindow) Get(name PropName) (interface{}, error) {
 }
 
 func (w *gtkWindow) Set(name PropName, value interface{}) error {
-        switch g := C.toWindow(unsafe.Pointer(w.g())); name {
+        switch g := C.to_window(unsafe.Pointer(w.g())); name {
         case Text:
                 if s, ok := value.(string); ok {
                         cs := C.CString(s); defer C.free(unsafe.Pointer(cs))
@@ -422,6 +445,25 @@ func (w *gtkWindow) Set(name PropName, value interface{}) error {
         return w.gtkWidget.Set(name, value)
 }
 
+func (w *gtkWindow) createSignal(name string) error {
+        s := glibNewSignal(name, C.gtk_window_get_type())
+
+        log.Printf("TODO: create signal %v, %v", name, s)
+        
+        return nil
+}
+
+func (w *gtkWindow) Emit(name CustomSignalName, args ...interface{}) error {
+        cs := C.CString(string(name)); defer C.free(unsafe.Pointer(cs))
+        glibSignalArgs.Lock()
+        glibSignalArgs.n++
+        glibSignalArgs.m[glibSignalArgs.n] = args
+        v := C.g_variant_new_uint32((C.guint32)(glibSignalArgs.n))
+        glibSignalArgs.Unlock()
+        C.signal_emit_by_name(C.gpointer(unsafe.Pointer(w.g())), (*C.gchar)(cs), v)
+        return nil
+}
+
 func newGtkWindow() View {
         //p := unsafe.Pointer(C.widget_new(C.gtk_widget_get_type()))
         p := unsafe.Pointer(C.gtk_window_new(C.GTK_WINDOW_TOPLEVEL)) // C.GTK_WINDOW_POPUP
@@ -429,7 +471,8 @@ func newGtkWindow() View {
                 log.Fatalf("gtk: cant create window")
                 return nil
         }
-        w := &gtkWindow{gtkWidget{glibInitiallyUnowned{glibObject{C.toObject(p)}}, 0}}
+        w := &gtkWindow{gtkWidget{glibInitiallyUnowned{glibObject{C.to_object(p)}}, 0},
+                make(map[string]View, 10)}
         return View(w)
 }
 
@@ -440,7 +483,7 @@ func newGtkBox(orientation int) View {
                 log.Fatalf("gtk: cant create box")
                 return nil
         }
-        w := &gtkBox{gtkWidget{glibInitiallyUnowned{glibObject{C.toObject(p)}}, 0}, 0}
+        w := &gtkBox{gtkWidget{glibInitiallyUnowned{glibObject{C.to_object(p)}}, 0}, 0}
         w.bits |= bitPackStart
         return View(w)
 }
@@ -451,7 +494,7 @@ func newGtkLabel() View {
                 log.Fatalf("gtk: cant create label")
                 return nil
         }
-        w := &gtkLabel{gtkWidget{glibInitiallyUnowned{glibObject{C.toObject(p)}}, 0}}
+        w := &gtkLabel{gtkWidget{glibInitiallyUnowned{glibObject{C.to_object(p)}}, 0}}
         return View(w)
 }
 
@@ -461,7 +504,7 @@ func newGtkEntry() View {
                 log.Fatalf("gtk: cant create entry")
                 return nil
         }
-        w := &gtkEntry{gtkWidget{glibInitiallyUnowned{glibObject{C.toObject(p)}}, 0}}
+        w := &gtkEntry{gtkWidget{glibInitiallyUnowned{glibObject{C.to_object(p)}}, 0}}
         return View(w)
 }
 
@@ -471,7 +514,7 @@ func newGtkTextView() View {
                 log.Fatalf("gtk: cant create TextView")
                 return nil
         }
-        w := &gtkTextView{gtkWidget{glibInitiallyUnowned{glibObject{C.toObject(p)}}, 0}}
+        w := &gtkTextView{gtkWidget{glibInitiallyUnowned{glibObject{C.to_object(p)}}, 0}}
         return View(w)
 }
 
@@ -481,7 +524,7 @@ func newGtkButton() View {
                 log.Fatalf("gtk: cant create button")
                 return nil
         }
-        w := &gtkButton{gtkWidget{glibInitiallyUnowned{glibObject{C.toObject(p)}}, 0}}
+        w := &gtkButton{gtkWidget{glibInitiallyUnowned{glibObject{C.to_object(p)}}, 0}}
         return View(w)
 }
 
@@ -491,7 +534,7 @@ func newGtkEditable() View {
                 log.Fatalf("gtk: cant create editable")
                 return nil
         }
-        //w := &gtkEditable{glibInitiallyUnowned{glibObject{C.toObject(p)}}}
+        //w := &gtkEditable{glibInitiallyUnowned{glibObject{C.to_object(p)}}}
         return nil //View(w)
 }
 
