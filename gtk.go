@@ -447,9 +447,9 @@ func (w *gtkWindow) Set(name PropName, value interface{}) error {
 
 func (w *gtkWindow) createSignal(name string) error {
         s := glibNewSignal(name, C.gtk_window_get_type())
-
-        log.Printf("TODO: create signal %v, %v", name, s)
-        
+        if s == 0 {
+                return errors.New("cant create signal")
+        }
         return nil
 }
 

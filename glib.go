@@ -511,7 +511,7 @@ func glibMarshal(closure *C.GClosure, retValue *C.GValue, nParams C.guint, param
         args, handled := make([]reflect.Value, 0, nCallParams), false
         if nGlibParams == 2 {
                 v0, v1 := C.value_at(params, C.int(0)), C.value_at(params, C.int(1))
-                if v0 != nil /*C.value_type(v0) == C.G_TYPE_OBJECT*/ && C.value_type(v1) == C.G_TYPE_VARIANT {
+                if v0 != nil && v1 != nil /*C.value_type(v0) == C.G_TYPE_OBJECT*/ && C.value_type(v1) == C.G_TYPE_VARIANT {
                         v := C.g_value_get_variant(v1)
                         n := uint(C.g_variant_get_uint32(v))
                         glibSignalArgs.RLock()
@@ -527,6 +527,7 @@ func glibMarshal(closure *C.GClosure, retValue *C.GValue, nParams C.guint, param
                         handled = true
                 }
         }
+
         if !handled {
                 for i := 0; i < nCallParams && (1+i) < nGlibParams; i++ {
                         gv := C.value_at(params, C.int(1+i))
