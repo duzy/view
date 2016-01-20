@@ -39,6 +39,7 @@ var (
                 "window": createWindow,
                 "static": createStatic,
                 "editable": createEditable,
+                "edit": createTextView,
                 "pushable": createPushable,
                 "horizontal": createHorizontal,
                 "vertical": createVertical,
@@ -241,6 +242,10 @@ func createStatic(a []xml.Attr) View {
 
 func createEditable(a []xml.Attr) View {
         return applyViewAttr(newGtkEntry(), a)
+}
+
+func createTextView(a []xml.Attr) View {
+        return applyViewAttr(newGtkTextView(), a)
 }
 
 func createPushable(a []xml.Attr) View {
